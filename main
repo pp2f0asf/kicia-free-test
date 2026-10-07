@@ -66523,4 +66523,63 @@ function K.Unload()
     if getgenv().KiciaRebuild == K then getgenv().KiciaRebuild = nil end
 end
 
+-- Re-run After Teleport (original Luarmor writer stripped from this rebuild).
+-- Unnamed's LoadAutoloadConfig only restores toggles on the *next manual execute*;
+-- this queues a tiny loader before server teleport so the cheat can survive match -> lobby -> match.
+local function K_installTeleportPersistence()
+    local store = tbl17.bG()
+    if not store or type(store.Data) ~= "table" then return end
+
+    local TeleportService = game:GetService("TeleportService")
+    local scriptPath = getgenv().KiciaScriptPath or "kiciarebuild/kicia.lua"
+    local loaderPath = getgenv().KiciaLoaderPath or "kiciarebuild/kicia_loader.lua"
+
+    local function queueApis()
+        return queue_on_teleport
+            or (syn and syn.queue_on_teleport)
+            or (fluxus and fluxus.queue_on_teleport)
+            or (secure_call and getgenv().queue_on_teleport)
+    end
+
+    local function buildQueuedSource()
+        local rf = readfile or (syn and syn.readfile)
+        local isf = isfile or (syn and syn.isfile)
+        if type(rf) == "function" and type(isf) == "function" and isf(loaderPath) then
+            return rf(loaderPath)
+        end
+        return ([[
+if getgenv().KiciaRebuild and getgenv().KiciaRebuild.Unload then pcall(getgenv().KiciaRebuild.Unload) end
+local p=%q
+local r=readfile or (syn and syn.readfile)
+local e=isfile or (syn and syn.isfile)
+if type(r)~="function" or type(e)~="function" or not e(p) then return end
+loadstring(r(p), "kicia")()
+]]):format(scriptPath)
+    end
+
+    local function autoExecuteEnabled()
+        local ae = store.Data.AutoExecuteScript
+        return type(ae) == "table" and ae.Enabled == true
+    end
+
+    local function queueForNextPlace()
+        if not autoExecuteEnabled() then return end
+        local queuer = queueApis()
+        if type(queuer) ~= "function" then return end
+        pcall(queuer, buildQueuedSource())
+    end
+
+    K.track(TeleportService.LocalPlayerTeleporting:Connect(queueForNextPlace))
+
+    if type(store.GetPropertyChangedSignal) == "function" then
+        K.track(store:GetPropertyChangedSignal({ "AutoExecuteScript", "Enabled" }):Connect(function()
+            queueForNextPlace()
+        end))
+    end
+
+    task.defer(queueForNextPlace)
+end
+
+K_installTeleportPersistence()
+
 tbl17.j1()(boot)
